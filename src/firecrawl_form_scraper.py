@@ -45,6 +45,33 @@ def scrape_search_results(url: str, search_term: str, input_selector: str):
 
     return result
 
+def generate_llms_text(results):
+    """
+    Generate formatted text input for LLM from scraped results.
+
+    Args:
+        results: The Document object returned by scrape_search_results
+
+    Returns:
+        str: Formatted text suitable for LLM input
+    """
+    # Extract relevant information from the Document object
+    content = results.markdown
+    title = results.metadata.title if results.metadata and results.metadata.title else "No title"
+    url = results.metadata.url if results.metadata and results.metadata.url else "No URL"
+    description = results.metadata.description if results.metadata and results.metadata.description else "No description"
+
+    # Format the text for LLM input
+    llm_text = f"""Title: {title}
+URL: {url}
+Description: {description}
+
+Content:
+{content}
+"""
+
+    return llm_text
+
 # Example usage
 if __name__ == "__main__":
     # Example: Search on Wikiloc
@@ -55,3 +82,8 @@ if __name__ == "__main__":
     results = scrape_search_results(url, search_term, input_selector)
     print("Scraped content:")
     print(results.markdown)
+
+    # Generate LLM input text
+    llm_input = generate_llms_text(results)
+    print("\nLLM Input Text:")
+    print(llm_input)
