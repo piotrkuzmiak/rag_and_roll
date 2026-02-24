@@ -1,5 +1,5 @@
 from firecrawl import Firecrawl
-from firecrawl.types import JsonFormat, Location
+from firecrawl.types import ClickAction, JsonFormat, Location, PressAction, WaitAction, WriteAction
 from pydantic import BaseModel
 import os
 import time
@@ -30,20 +30,11 @@ def extract_structured_data(url: str, search_term: str,input_selector: str, sche
         prompt: Custom prompt for the extraction
     """
     actions = [
-                {
-                    "type": "click",
-                    "selector": input_selector,
-                },
-                {
-                    "type": "write",
-                    "text": search_term
-                },
-                {
-                    "type": "press",
-                    "key": "Enter"
-                },
-                {"type": "wait", "milliseconds": 1500},
-            ]
+        ClickAction(selector=input_selector),
+        WriteAction(text=search_term),
+        PressAction(key="Enter"),
+        WaitAction(milliseconds=1500),
+    ]
     # Convert Pydantic model to JSON schema
     schema = None
     if schema_model:
