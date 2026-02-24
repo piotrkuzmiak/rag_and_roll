@@ -1,2 +1,7 @@
 .python-version
 .vscode/settings.json
+.env
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
