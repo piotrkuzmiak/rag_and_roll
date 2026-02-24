@@ -8,4 +8,11 @@ dependencies = [
     "firecrawl-py>=4.16.0",
     "pydantic-ai>=1.62.0",
     "pydantic-ai-slim[google]>=1.62.0",
+    "firecrawl-py>=0.0.20",
+    "python-dotenv>=1.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
 ]
