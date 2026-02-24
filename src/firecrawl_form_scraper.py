@@ -1,5 +1,5 @@
 from firecrawl import Firecrawl
-from firecrawl.types import Location
+from firecrawl.types import JsonFormat, Location
 from pydantic import BaseModel
 import os
 import time
@@ -31,8 +31,11 @@ def extract_structured_data(url: str, search_term: str,input_selector: str, sche
     """
     actions = [
                 {
-                    "type": "write",
+                    "type": "click",
                     "selector": input_selector,
+                },
+                {
+                    "type": "write",
                     "text": search_term
                 },
                 {
@@ -40,7 +43,6 @@ def extract_structured_data(url: str, search_term: str,input_selector: str, sche
                     "key": "Enter"
                 },
                 {"type": "wait", "milliseconds": 1500},
-                {"type": "screenshot", "fullPage": True},
             ]
     # Convert Pydantic model to JSON schema
     schema = None
@@ -54,12 +56,8 @@ def extract_structured_data(url: str, search_term: str,input_selector: str, sche
     # Use Firecrawl's JSON extraction
     result = app.scrape(
         url,
-        actions = actions,
-        formats=[{
-            "type": "json",
-            "schema": schema,
-            "prompt": prompt
-        }],
+        actions=actions,
+        formats=[JsonFormat(type="json", schema=schema, prompt=prompt)],
         only_main_content=True,
         timeout=30000,
         remove_base64_images=True,
@@ -78,7 +76,7 @@ if __name__ == "__main__":
     travel_result = extract_structured_data(
         url=travel_url,
         search_term="Tatry",
-        input_selector="searchInput",
+        input_selector="#searchInput",
         schema_model=TravelDestination,
         prompt="Extract information about this travel destination including name, location, description, best time to visit, main attractions, difficulty level, and typical duration."
     )
