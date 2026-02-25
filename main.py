@@ -92,7 +92,8 @@ def main(
     )
 
     # Get the collection.
-    collection = create_update_chromadb_collection(collection_name=collection_name, travel_result=travel_result)
+    travel_result_dict = travel_result.model_dump()
+    collection = create_update_chromadb_collection(data=travel_result_dict, collection_name=collection_name)
     # We use a simple input loop.
     while True:
         # Get the user's query
