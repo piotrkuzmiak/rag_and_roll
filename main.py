@@ -14,12 +14,18 @@ class GoogleGenAIEmbeddingFunction(embedding_functions.EmbeddingFunction[Documen
         self.task_type = task_type
 
     def __call__(self, input: Documents) -> Embeddings:
-        response = self.client.models.embed_content(
-            model=self.model_name,
-            contents=input,
-            config={"task_type": self.task_type}
-        )
-        return [list(ce.values) for ce in response.embeddings]
+        # Google GenAI API has a limit of 100 documents per batch
+        batch_size = 100
+        all_embeddings = []
+        for i in range(0, len(input), batch_size):
+            batch = input[i : i + batch_size]
+            response = self.client.models.embed_content(
+                model=self.model_name,
+                contents=batch,
+                config={"task_type": self.task_type}
+            )
+            all_embeddings.extend([list(ce.values) for ce in response.embeddings])
+        return all_embeddings
 
 
 def build_prompt(query: str, context: List[str]) -> str:
