@@ -6,7 +6,6 @@ from src.wikivoyage_textfile_to_chromadb import create_chromadb_collection_from_
 from chromadb.utils import embedding_functions
 
 
-client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
 
 
 def build_prompt(query: str, context: List[str]) -> str:
@@ -43,11 +42,12 @@ def build_prompt(query: str, context: List[str]) -> str:
     return system
 
 
-def get_gemini_response(query: str, context: List[str]) -> str:
+def get_gemini_response(client: genai.Client, query: str, context: List[str]) -> str:
     """
     Queries the Gemini API to get a response to the question.
 
     Args:
+    client (genai.Client): The Google GenAI client.
     query (str): The original query.
     context (List[str]): The context of the query, returned by embedding search.
 
@@ -70,19 +70,18 @@ def main(
     # collection_name: str = "documents_collection", persist_directory: str = "."
 ) -> None:
     # Check if the GOOGLE_API_KEY environment variable is set. Prompt the user to set it if not.
-    google_api_key = None
     if "GOOGLE_API_KEY" not in os.environ:
         gapikey = input("Please enter your Google API Key: ")
-        genai.configure(api_key=gapikey)
-        google_api_key = gapikey
-    else:
-        google_api_key = os.environ["GOOGLE_API_KEY"]
+        os.environ["GOOGLE_API_KEY"] = gapikey
+
+    google_api_key = os.environ["GOOGLE_API_KEY"]
+    client = genai.Client(api_key=google_api_key)
 
     # create embedding function
     embedding_function = embedding_functions.GoogleGenerativeAiEmbeddingFunction(
         api_key=google_api_key,
         model_name="models/embedding-001",
-        task_type="RETRIEVAL_QUERY",
+        task_type="RETRIEVAL_DOCUMENT",
     )
 
     # Fetch data for the collection. In this case, we are fetching travel destination information from Wikivoyage.
@@ -109,6 +108,9 @@ def main(
             continue
         print("\nThinking...\n")
 
+        # Update task type for query
+        embedding_function.task_type = "RETRIEVAL_QUERY"
+
         # Query the collection to get the 5 most relevant results
         results = collection.query(
             query_texts=[query], n_results=5, include=["documents", "metadatas"]
@@ -122,7 +124,7 @@ def main(
         )
 
         # Get the response from Gemini
-        response = get_gemini_response(query, results["documents"][0])  # type: ignore
+        response = get_gemini_response(client, query, results["documents"][0])  # type: ignore
 
         # Output, with sources
         print(response)
