@@ -8,7 +8,7 @@ from chromadb.api.types import Documents, Embeddings
 
 
 class GoogleGenAIEmbeddingFunction(embedding_functions.EmbeddingFunction[Documents]):
-    def __init__(self, client: genai.Client, model_name: str = "models/text-embedding-004", task_type: str = "RETRIEVAL_DOCUMENT"):
+    def __init__(self, client: genai.Client, model_name: str = "gemini-embedding-001", task_type: str = "RETRIEVAL_DOCUMENT"):
         self.client = client
         self.model_name = model_name
         self.task_type = task_type
@@ -100,7 +100,7 @@ def main(
     # create embedding function
     embedding_function = GoogleGenAIEmbeddingFunction(
         client=client,
-        model_name="models/text-embedding-004",
+        model_name="gemini-embedding-001",
         task_type="RETRIEVAL_DOCUMENT",
     )
 
