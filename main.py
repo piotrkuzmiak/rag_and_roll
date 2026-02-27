@@ -1,14 +1,13 @@
 import os
 from typing import List
 
-import google.generativeai as genai
-from src.firecrawl_form_scraper import extract_structured_data, TravelDestination
-from src.chromadb_load_data import create_update_chromadb_collection
+import google.genai as genai
+from src.wikivoyage_textfile_to_chromadb import create_chromadb_collection_from_csv
 from chromadb.utils import embedding_functions
 
-MAIN_ENTRY_URL = "https://wikivoyage.org"
 
-model =  genai.GenerativeModel("gemini-2.5-flash")
+client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
+
 
 def build_prompt(query: str, context: List[str]) -> str:
     """
@@ -35,7 +34,7 @@ def build_prompt(query: str, context: List[str]) -> str:
     }
     user_prompt = {
         "content": f" The question is '{query}'. Here is all the context you have:"
-        f'{(" ").join(context)}',
+        f"{(' ').join(context)}",
     }
 
     # combine the prompts to output a single prompt string
@@ -56,17 +55,19 @@ def get_gemini_response(query: str, context: List[str]) -> str:
     A response to the question.
     """
 
-    response = model.generate_content(build_prompt(query, context))
+    response = client.models.generate_content(model="gemini-2.0-flash", contents=build_prompt(query, context))
 
     return response.text
+
 
 # def main():
 #     print("Hello from rag-and-roll!")
 #     destinations = extract_structured_data(MAIN_ENTRY_URL)
 #     create_update_chromadb_collection(destinations)
 
+
 def main(
-    collection_name: str = "documents_collection", persist_directory: str = "."
+    # collection_name: str = "documents_collection", persist_directory: str = "."
 ) -> None:
     # Check if the GOOGLE_API_KEY environment variable is set. Prompt the user to set it if not.
     google_api_key = None
@@ -78,22 +79,27 @@ def main(
         google_api_key = os.environ["GOOGLE_API_KEY"]
 
     # create embedding function
-    embedding_function = embedding_functions.GoogleGenerativeAIEmbeddingFunction(
-        api_key=google_api_key, task_type="RETRIEVAL_QUERY"
+    embedding_function = embedding_functions.GoogleGenerativeAiEmbeddingFunction(
+        api_key=google_api_key,
+        model_name="models/embedding-001",
+        task_type="RETRIEVAL_QUERY",
     )
 
-    #Fetch data for the collection. In this case, we are fetching travel destination information from Wikivoyage.
-    travel_result = extract_structured_data(
-        url=MAIN_ENTRY_URL,
-        search_term="travel destinations",
-        input_selector="#searchInput",
-        schema_model=TravelDestination,
-        prompt="Extract travel destination information from this webpage. Focus on the name, location, description, best time to visit, attractions, difficulty level, and duration in days for each destination.",
-    )
+    # Fetch data for the collection. In this case, we are fetching travel destination information from Wikivoyage.
+    # travel_result = extract_structured_data(
+    #     url=MAIN_ENTRY_URL,
+    #     search_term="travel destinations",
+    #     input_selector="#searchInput",
+    #     schema_model=TravelDestination,
+    #     prompt="Extract travel destination information from this webpage. Focus on the name, location, description, best time to visit, attractions, difficulty level, and duration in days for each destination.",
+    # )
 
     # Get the collection.
-    travel_result_dict = travel_result.model_dump()
-    collection = create_update_chromadb_collection(data=travel_result_dict, collection_name=collection_name)
+    # travel_result_dict = travel_result.model_dump()
+    collection = create_chromadb_collection_from_csv(
+        file_path=f"{os.path.dirname(os.path.abspath(__file__))}/wikivoyage_data/wikivoyage-listings-en.csv",
+        embedding_function=embedding_function,
+    )
     # We use a simple input loop.
     while True:
         # Get the user's query
@@ -123,6 +129,7 @@ def main(
         print("\n")
         print(f"Source documents:\n{sources}")
         print("\n")
+
 
 if __name__ == "__main__":
     main()
