@@ -4,15 +4,16 @@ from typing import List
 import google.genai as genai
 from src.wikivoyage_textfile_to_chromadb import create_chromadb_collection_from_csv
 from chromadb.utils import embedding_functions
+from chromadb.api.types import Documents, Embeddings
 
 
-class GoogleGenAIEmbeddingFunction(embedding_functions.EmbeddingFunction):
+class GoogleGenAIEmbeddingFunction(embedding_functions.EmbeddingFunction[Documents]):
     def __init__(self, client: genai.Client, model_name: str = "models/text-embedding-004", task_type: str = "RETRIEVAL_DOCUMENT"):
         self.client = client
         self.model_name = model_name
         self.task_type = task_type
 
-    def __call__(self, input: embedding_functions.Documents) -> embedding_functions.Embeddings:
+    def __call__(self, input: Documents) -> Embeddings:
         response = self.client.models.embed_content(
             model=self.model_name,
             contents=input,
