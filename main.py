@@ -80,7 +80,7 @@ def main(
     # create embedding function
     embedding_function = embedding_functions.GoogleGenerativeAiEmbeddingFunction(
         api_key=google_api_key,
-        model_name="models/embedding-001",
+        model_name="models/text-embedding-004",
         task_type="RETRIEVAL_DOCUMENT",
     )
 
