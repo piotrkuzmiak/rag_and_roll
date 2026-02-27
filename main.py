@@ -6,6 +6,19 @@ from src.wikivoyage_textfile_to_chromadb import create_chromadb_collection_from_
 from chromadb.utils import embedding_functions
 
 
+class GoogleGenAIEmbeddingFunction(embedding_functions.EmbeddingFunction):
+    def __init__(self, client: genai.Client, model_name: str = "models/text-embedding-004", task_type: str = "RETRIEVAL_DOCUMENT"):
+        self.client = client
+        self.model_name = model_name
+        self.task_type = task_type
+
+    def __call__(self, input: embedding_functions.Documents) -> embedding_functions.Embeddings:
+        response = self.client.models.embed_content(
+            model=self.model_name,
+            contents=input,
+            config={"task_type": self.task_type}
+        )
+        return [list(ce.values) for ce in response.embeddings]
 
 
 def build_prompt(query: str, context: List[str]) -> str:
@@ -78,8 +91,8 @@ def main(
     client = genai.Client(api_key=google_api_key)
 
     # create embedding function
-    embedding_function = embedding_functions.GoogleGenerativeAiEmbeddingFunction(
-        api_key=google_api_key,
+    embedding_function = GoogleGenAIEmbeddingFunction(
+        client=client,
         model_name="models/text-embedding-004",
         task_type="RETRIEVAL_DOCUMENT",
     )
