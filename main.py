@@ -95,7 +95,7 @@ def main(
         os.environ["GOOGLE_API_KEY"] = gapikey
 
     google_api_key = os.environ["GOOGLE_API_KEY"]
-    client = genai.Client(api_key=google_api_key)
+    client = genai.Client(api_key=google_api_key, http_options={"api_version": "v1"})
 
     # create embedding function
     embedding_function = GoogleGenAIEmbeddingFunction(
