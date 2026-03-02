@@ -2,29 +2,62 @@ import os
 from typing import List
 
 import google.genai as genai
-from src.wikivoyage_textfile_to_chromadb import create_chromadb_collection_from_csv
+from chromadb.api.types import Documents, Embeddings
 from chromadb.utils import embedding_functions
+from google.genai import errors as genai_errors
+
+from src.wikivoyage_textfile_to_chromadb import create_chromadb_collection_from_csv
 
 
-client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
+class GoogleGenAIEmbeddingFunction(embedding_functions.EmbeddingFunction[Documents]):
+    def __init__(
+        self,
+        client: genai.Client,
+        model_name: str = "gemini-embedding-001",
+        task_type: str = "RETRIEVAL_DOCUMENT",
+    ):
+        self.client = client
+        self.model_name = model_name
+        self.task_type = task_type
+
+    def _embed_batch_with_fallback(self, batch: Documents) -> list[list[float]]:
+        models_to_try = [
+            self.model_name,
+            "gemini-embedding-001",
+            "text-embedding-004",
+        ]
+
+        last_error = None
+        for model in dict.fromkeys(models_to_try):
+            try:
+                response = self.client.models.embed_content(
+                    model=model,
+                    contents=batch,
+                    config={"task_type": self.task_type},
+                )
+                self.model_name = model
+                return [list(ce.values) for ce in response.embeddings]
+            except genai_errors.ClientError as exc:
+                # Retry only when the model is unavailable for the selected API version.
+                if getattr(exc, "code", None) != 404:
+                    raise
+                last_error = exc
+
+        if last_error:
+            raise last_error
+        raise RuntimeError("Failed to generate embeddings for unknown reasons.")
+
+    def __call__(self, input: Documents) -> Embeddings:
+        # Google GenAI API has a limit of 100 documents per batch.
+        batch_size = 100
+        all_embeddings: Embeddings = []
+        for i in range(0, len(input), batch_size):
+            batch = input[i : i + batch_size]
+            all_embeddings.extend(self._embed_batch_with_fallback(batch))
+        return all_embeddings
 
 
 def build_prompt(query: str, context: List[str]) -> str:
-    """
-    Builds a prompt for the LLM. #
-
-    This function builds a prompt for the LLM. It takes the original query,
-    and the returned context, and asks the model to answer the question based only
-    on what's in the context, not what's in its weights.
-
-    Args:
-    query (str): The original query.
-    context (List[str]): The context of the query, returned by embedding search.
-
-    Returns:
-    A prompt for the LLM (str).
-    """
-
     base_prompt = {
         "content": "I am going to ask you a question, which I would like you to answer"
         " based only on the provided context, and not any other information."
@@ -36,80 +69,45 @@ def build_prompt(query: str, context: List[str]) -> str:
         "content": f" The question is '{query}'. Here is all the context you have:"
         f"{(' ').join(context)}",
     }
-
-    # combine the prompts to output a single prompt string
-    system = f"{base_prompt['content']} {user_prompt['content']}"
-
-    return system
+    return f"{base_prompt['content']} {user_prompt['content']}"
 
 
-def get_gemini_response(query: str, context: List[str]) -> str:
-    """
-    Queries the Gemini API to get a response to the question.
-
-    Args:
-    query (str): The original query.
-    context (List[str]): The context of the query, returned by embedding search.
-
-    Returns:
-    A response to the question.
-    """
-
-    response = client.models.generate_content(model="gemini-2.0-flash", contents=build_prompt(query, context))
-
+def get_gemini_response(client: genai.Client, query: str, context: List[str]) -> str:
+    response = client.models.generate_content(
+        model="gemini-2.0-flash", contents=build_prompt(query, context)
+    )
     return response.text
 
 
-# def main():
-#     print("Hello from rag-and-roll!")
-#     destinations = extract_structured_data(MAIN_ENTRY_URL)
-#     create_update_chromadb_collection(destinations)
-
-
-def main(
-    # collection_name: str = "documents_collection", persist_directory: str = "."
-) -> None:
-    # Check if the GOOGLE_API_KEY environment variable is set. Prompt the user to set it if not.
-    google_api_key = None
+def main() -> None:
     if "GOOGLE_API_KEY" not in os.environ:
         gapikey = input("Please enter your Google API Key: ")
-        genai.configure(api_key=gapikey)
-        google_api_key = gapikey
-    else:
-        google_api_key = os.environ["GOOGLE_API_KEY"]
+        os.environ["GOOGLE_API_KEY"] = gapikey
 
-    # create embedding function
-    embedding_function = embedding_functions.GoogleGenerativeAiEmbeddingFunction(
-        api_key=google_api_key,
-        model_name="models/embedding-001",
-        task_type="RETRIEVAL_QUERY",
+    google_api_key = os.environ["GOOGLE_API_KEY"]
+    api_version = os.environ.get("GOOGLE_API_VERSION", "v1beta")
+    client = genai.Client(api_key=google_api_key, http_options={"api_version": api_version})
+
+    embedding_function = GoogleGenAIEmbeddingFunction(
+        client=client,
+        model_name=os.environ.get("GOOGLE_EMBEDDING_MODEL", "gemini-embedding-001"),
+        task_type="RETRIEVAL_DOCUMENT",
     )
 
-    # Fetch data for the collection. In this case, we are fetching travel destination information from Wikivoyage.
-    # travel_result = extract_structured_data(
-    #     url=MAIN_ENTRY_URL,
-    #     search_term="travel destinations",
-    #     input_selector="#searchInput",
-    #     schema_model=TravelDestination,
-    #     prompt="Extract travel destination information from this webpage. Focus on the name, location, description, best time to visit, attractions, difficulty level, and duration in days for each destination.",
-    # )
-
-    # Get the collection.
-    # travel_result_dict = travel_result.model_dump()
     collection = create_chromadb_collection_from_csv(
         file_path=f"{os.path.dirname(os.path.abspath(__file__))}/wikivoyage_data/wikivoyage-listings-en.csv",
         embedding_function=embedding_function,
     )
-    # We use a simple input loop.
+
     while True:
-        # Get the user's query
         query = input("Query: ")
         if len(query) == 0:
             print("Please enter a question. Ctrl+C to Quit.\n")
             continue
         print("\nThinking...\n")
 
-        # Query the collection to get the 5 most relevant results
+        embedding_function.task_type = "RETRIEVAL_QUERY"
+
         results = collection.query(
             query_texts=[query], n_results=5, include=["documents", "metadatas"]
         )
@@ -121,10 +119,8 @@ def main(
             ]
         )
 
-        # Get the response from Gemini
-        response = get_gemini_response(query, results["documents"][0])  # type: ignore
+        response = get_gemini_response(client, query, results["documents"][0])  # type: ignore
 
-        # Output, with sources
         print(response)
         print("\n")
         print(f"Source documents:\n{sources}")
