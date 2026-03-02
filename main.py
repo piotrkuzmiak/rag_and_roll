@@ -22,7 +22,9 @@ class GoogleGenAIEmbeddingFunction(embedding_functions.EmbeddingFunction[Documen
         self.client = client
         self.model_name = model_name
         self.task_type = task_type
-        self.requests_per_minute = requests_per_minute
+        # Free-tier quota is 100 embedding requests/minute. Keep a safety margin
+        # below this ceiling to avoid transient quota spikes.
+        self.requests_per_minute = max(1, min(requests_per_minute, 90))
         self._request_timestamps: deque[float] = deque()
 
     def _wait_for_rate_limit(self) -> None:
@@ -51,22 +53,45 @@ class GoogleGenAIEmbeddingFunction(embedding_functions.EmbeddingFunction[Documen
 
         last_error = None
         for model in dict.fromkeys(models_to_try):
-            try:
-                self._wait_for_rate_limit()
-                response = self.client.models.embed_content(
-                    model=model,
-                    contents=batch,
-                    config={"task_type": self.task_type},
-                )
-                self.model_name = model
-                return [list(ce.values) for ce in response.embeddings]
-            except genai_errors.ClientError as exc:
-                # Retry only when the model is unavailable for the selected API version.
-                if getattr(exc, "code", None) != 404:
+            max_retries = 3
+            for _ in range(max_retries):
+                try:
+                    self._wait_for_rate_limit()
+                    response = self.client.models.embed_content(
+                        model=model,
+                        contents=batch,
+                        config={"task_type": self.task_type},
+                    )
+                    self.model_name = model
+                    return [list(ce.values) for ce in response.embeddings]
+                except genai_errors.ClientError as exc:
+                    error_code = getattr(exc, "code", None)
+
+                    # Retry on quota/rate-limit issues after honoring server-provided
+                    # retry delay when available.
+                    if error_code == 429:
+                        retry_after = 45
+                        retry_info = getattr(exc, "response_json", {})
+                        try:
+                            details = retry_info.get("error", {}).get("details", [])
+                            for detail in details:
+                                retry_delay = detail.get("retryDelay")
+                                if isinstance(retry_delay, str) and retry_delay.endswith("s"):
+                                    retry_after = max(retry_after, int(float(retry_delay[:-1])) + 1)
+                        except Exception:
+                            retry_after = 45
+
+                        time.sleep(retry_after)
+                        continue
+
+                    # Retry only when the model is unavailable for the selected API version.
+                    if error_code == 404:
+                        last_error = exc
+                        break
+
                     raise
-                last_error = exc
-            finally:
-                self._request_timestamps.append(time.monotonic())
+                finally:
+                    self._request_timestamps.append(time.monotonic())
 
         if last_error:
             raise last_error
