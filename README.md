@@ -23,6 +23,7 @@ Optional runtime config:
 ```bash
 export GOOGLE_API_VERSION=v1beta
 export GOOGLE_EMBEDDING_MODEL=gemini-embedding-001
+export GOOGLE_EMBEDDING_REQUESTS_PER_MINUTE=30
 ```
 
 ## Usage
