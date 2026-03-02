@@ -1,110 +1,10 @@
 import os
-import time
-from collections import deque
 from typing import List
 
 import google.genai as genai
-from chromadb.api.types import Documents, Embeddings
-from chromadb.utils import embedding_functions
-from google.genai import errors as genai_errors
+from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
 from src.wikivoyage_textfile_to_chromadb import create_chromadb_collection_from_csv
-
-
-class GoogleGenAIEmbeddingFunction(embedding_functions.EmbeddingFunction[Documents]):
-    def __init__(
-        self,
-        client: genai.Client,
-        model_name: str = "gemini-embedding-001",
-        task_type: str = "RETRIEVAL_DOCUMENT",
-        requests_per_minute: int = 30,
-    ):
-        self.client = client
-        self.model_name = model_name
-        self.task_type = task_type
-        # Free-tier quota is 100 embedding requests/minute. Keep a safety margin
-        # below this ceiling to avoid transient quota spikes.
-        self.requests_per_minute = max(1, min(requests_per_minute, 90))
-        self._request_timestamps: deque[float] = deque()
-
-    def _wait_for_rate_limit(self) -> None:
-        now = time.monotonic()
-        one_minute_ago = now - 60
-
-        while self._request_timestamps and self._request_timestamps[0] <= one_minute_ago:
-            self._request_timestamps.popleft()
-
-        if len(self._request_timestamps) >= self.requests_per_minute:
-            sleep_for = self._request_timestamps[0] + 60 - now
-            if sleep_for > 0:
-                time.sleep(sleep_for)
-
-            now = time.monotonic()
-            one_minute_ago = now - 60
-            while self._request_timestamps and self._request_timestamps[0] <= one_minute_ago:
-                self._request_timestamps.popleft()
-
-    def _embed_batch_with_fallback(self, batch: Documents) -> list[list[float]]:
-        models_to_try = [
-            self.model_name,
-            "gemini-embedding-001",
-            "text-embedding-004",
-        ]
-
-        last_error = None
-        for model in dict.fromkeys(models_to_try):
-            max_retries = 3
-            for _ in range(max_retries):
-                try:
-                    self._wait_for_rate_limit()
-                    response = self.client.models.embed_content(
-                        model=model,
-                        contents=batch,
-                        config={"task_type": self.task_type},
-                    )
-                    self.model_name = model
-                    return [list(ce.values) for ce in response.embeddings]
-                except genai_errors.ClientError as exc:
-                    error_code = getattr(exc, "code", None)
-
-                    # Retry on quota/rate-limit issues after honoring server-provided
-                    # retry delay when available.
-                    if error_code == 429:
-                        retry_after = 45
-                        retry_info = getattr(exc, "response_json", {})
-                        try:
-                            details = retry_info.get("error", {}).get("details", [])
-                            for detail in details:
-                                retry_delay = detail.get("retryDelay")
-                                if isinstance(retry_delay, str) and retry_delay.endswith("s"):
-                                    retry_after = max(retry_after, int(float(retry_delay[:-1])) + 1)
-                        except Exception:
-                            retry_after = 45
-
-                        time.sleep(retry_after)
-                        continue
-
-                    # Retry only when the model is unavailable for the selected API version.
-                    if error_code == 404:
-                        last_error = exc
-                        break
-
-                    raise
-                finally:
-                    self._request_timestamps.append(time.monotonic())
-
-        if last_error:
-            raise last_error
-        raise RuntimeError("Failed to generate embeddings for unknown reasons.")
-
-    def __call__(self, input: Documents) -> Embeddings:
-        # Google GenAI API has a limit of 100 documents per batch.
-        batch_size = 100
-        all_embeddings: Embeddings = []
-        for i in range(0, len(input), batch_size):
-            batch = input[i : i + batch_size]
-            all_embeddings.extend(self._embed_batch_with_fallback(batch))
-        return all_embeddings
 
 
 def build_prompt(query: str, context: List[str]) -> str:
@@ -138,16 +38,15 @@ def main() -> None:
     api_version = os.environ.get("GOOGLE_API_VERSION", "v1beta")
     client = genai.Client(api_key=google_api_key, http_options={"api_version": api_version})
 
-    embedding_function = GoogleGenAIEmbeddingFunction(
-        client=client,
-        model_name=os.environ.get("GOOGLE_EMBEDDING_MODEL", "gemini-embedding-001"),
-        task_type="RETRIEVAL_DOCUMENT",
-        requests_per_minute=int(os.environ.get("GOOGLE_EMBEDDING_REQUESTS_PER_MINUTE", "30")),
-    )
+    sentence_transformer_ef = SentenceTransformerEmbeddingFunction(
+    model_name="all-MiniLM-L6-v2",
+    device="cpu",
+    normalize_embeddings=False
+)
 
     collection = create_chromadb_collection_from_csv(
         file_path=f"{os.path.dirname(os.path.abspath(__file__))}/wikivoyage_data/wikivoyage-listings-en.csv",
-        embedding_function=embedding_function,
+        embedding_function=sentence_transformer_ef,
     )
 
     while True:
@@ -156,8 +55,6 @@ def main() -> None:
             print("Please enter a question. Ctrl+C to Quit.\n")
             continue
         print("\nThinking...\n")
-
-        embedding_function.task_type = "RETRIEVAL_QUERY"
 
         results = collection.query(
             query_texts=[query], n_results=5, include=["documents", "metadatas"]
