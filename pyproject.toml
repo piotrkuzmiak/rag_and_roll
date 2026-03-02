@@ -5,7 +5,6 @@ description = "Building RAG utilizing Google Gemini LLM to interact with wikivoy
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "firecrawl-py>=4.16.0",
     "pydantic-ai>=1.62.0",
     "pydantic-ai-slim[google]>=1.62.0",
     "python-dotenv>=1.0.0",
