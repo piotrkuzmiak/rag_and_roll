@@ -17,7 +17,7 @@ class GoogleGenAIEmbeddingFunction(embedding_functions.EmbeddingFunction[Documen
         client: genai.Client,
         model_name: str = "gemini-embedding-001",
         task_type: str = "RETRIEVAL_DOCUMENT",
-        requests_per_minute: int = 100,
+        requests_per_minute: int = 30,
     ):
         self.client = client
         self.model_name = model_name
@@ -117,7 +117,7 @@ def main() -> None:
         client=client,
         model_name=os.environ.get("GOOGLE_EMBEDDING_MODEL", "gemini-embedding-001"),
         task_type="RETRIEVAL_DOCUMENT",
-        requests_per_minute=int(os.environ.get("GOOGLE_EMBEDDING_REQUESTS_PER_MINUTE", "100")),
+        requests_per_minute=int(os.environ.get("GOOGLE_EMBEDDING_REQUESTS_PER_MINUTE", "30")),
     )
 
     collection = create_chromadb_collection_from_csv(
