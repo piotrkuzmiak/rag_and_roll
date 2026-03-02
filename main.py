@@ -1,4 +1,6 @@
 import os
+import time
+from collections import deque
 from typing import List
 
 import google.genai as genai
@@ -15,10 +17,30 @@ class GoogleGenAIEmbeddingFunction(embedding_functions.EmbeddingFunction[Documen
         client: genai.Client,
         model_name: str = "gemini-embedding-001",
         task_type: str = "RETRIEVAL_DOCUMENT",
+        requests_per_minute: int = 100,
     ):
         self.client = client
         self.model_name = model_name
         self.task_type = task_type
+        self.requests_per_minute = requests_per_minute
+        self._request_timestamps: deque[float] = deque()
+
+    def _wait_for_rate_limit(self) -> None:
+        now = time.monotonic()
+        one_minute_ago = now - 60
+
+        while self._request_timestamps and self._request_timestamps[0] <= one_minute_ago:
+            self._request_timestamps.popleft()
+
+        if len(self._request_timestamps) >= self.requests_per_minute:
+            sleep_for = self._request_timestamps[0] + 60 - now
+            if sleep_for > 0:
+                time.sleep(sleep_for)
+
+            now = time.monotonic()
+            one_minute_ago = now - 60
+            while self._request_timestamps and self._request_timestamps[0] <= one_minute_ago:
+                self._request_timestamps.popleft()
 
     def _embed_batch_with_fallback(self, batch: Documents) -> list[list[float]]:
         models_to_try = [
@@ -30,6 +52,7 @@ class GoogleGenAIEmbeddingFunction(embedding_functions.EmbeddingFunction[Documen
         last_error = None
         for model in dict.fromkeys(models_to_try):
             try:
+                self._wait_for_rate_limit()
                 response = self.client.models.embed_content(
                     model=model,
                     contents=batch,
@@ -42,6 +65,8 @@ class GoogleGenAIEmbeddingFunction(embedding_functions.EmbeddingFunction[Documen
                 if getattr(exc, "code", None) != 404:
                     raise
                 last_error = exc
+            finally:
+                self._request_timestamps.append(time.monotonic())
 
         if last_error:
             raise last_error
@@ -92,6 +117,7 @@ def main() -> None:
         client=client,
         model_name=os.environ.get("GOOGLE_EMBEDDING_MODEL", "gemini-embedding-001"),
         task_type="RETRIEVAL_DOCUMENT",
+        requests_per_minute=int(os.environ.get("GOOGLE_EMBEDDING_REQUESTS_PER_MINUTE", "100")),
     )
 
     collection = create_chromadb_collection_from_csv(
