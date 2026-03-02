@@ -12,6 +12,7 @@ dependencies = [
     "google-generativeai>=0.8.6",
     "tqdm>=4.67.3",
     "pandas>=3.0.1",
+    "sentence-transformers>=5.2.3",
 ]
 
 [dependency-groups]
