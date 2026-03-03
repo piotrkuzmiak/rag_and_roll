@@ -3,6 +3,7 @@ from typing import List
 
 from openai import OpenAI
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+import torch
 
 from src.wikivoyage_textfile_to_chromadb import create_chromadb_collection_from_csv
 
@@ -35,12 +36,13 @@ def main() -> None:
         os.environ["OPENAI_API_KEY"] = openai_api_key
 
     client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    embedding_device = "cuda" if torch.cuda.is_available() else "cpu"
 
     sentence_transformer_ef = SentenceTransformerEmbeddingFunction(
-    model_name="all-MiniLM-L6-v2",
-    device="cpu",
-    normalize_embeddings=False
-)
+        model_name="all-MiniLM-L6-v2",
+        device=embedding_device,
+        normalize_embeddings=False,
+    )
 
     collection = create_chromadb_collection_from_csv(
         file_path=f"{os.path.dirname(os.path.abspath(__file__))}/wikivoyage_data/wikivoyage-listings-en.csv",
