@@ -49,6 +49,7 @@ def create_chromadb_collection_from_csv(
     embedding_function=None,
     show_progress: bool = True,
     persist_directory: str | Path = Path(__file__).resolve().parent.parent / "chroma_storage",
+    force_reindex: bool = False,
 ) -> chromadb.Collection:
     """
     Creates or updates a ChromaDB collection from a CSV file.
@@ -70,6 +71,9 @@ def create_chromadb_collection_from_csv(
         persist_directory (str | Path, optional): Directory used by
             chromadb.PersistentClient. Defaults to
             <project_root>/chroma_storage.
+        force_reindex (bool, optional): If True, re-read the CSV and upsert all
+            rows even when the persistent collection already contains data.
+            Defaults to False.
 
     Returns:
         chromadb.Collection: The ChromaDB collection object.
@@ -79,6 +83,16 @@ def create_chromadb_collection_from_csv(
     persist_path.mkdir(parents=True, exist_ok=True)
     client = chromadb.PersistentClient(path=str(persist_path))
     collection = client.get_or_create_collection(name=collection_name, embedding_function=embedding_function)
+    existing_count = collection.count()
+
+    # Reuse persistent embeddings when available, unless caller explicitly forces reindexing.
+    if existing_count > 0 and not force_reindex:
+        if show_progress:
+            print(
+                f"Using existing ChromaDB collection '{collection_name}' "
+                f"with {existing_count} embedded documents."
+            )
+        return collection
 
     total_rows = _count_csv_data_rows(file_path) if show_progress else 0
     processed_rows = 0
