@@ -7,6 +7,7 @@ the data.
 """
 import pandas as pd
 import chromadb
+from pathlib import Path
 
 
 def _count_csv_data_rows(file_path: str) -> int:
@@ -47,6 +48,7 @@ def create_chromadb_collection_from_csv(
     chunk_size: int = 500,
     embedding_function=None,
     show_progress: bool = True,
+    persist_directory: str | Path = Path(__file__).resolve().parent.parent / "chroma_storage",
 ) -> chromadb.Collection:
     """
     Creates or updates a ChromaDB collection from a CSV file.
@@ -65,12 +67,17 @@ def create_chromadb_collection_from_csv(
             used as metadata. Defaults to a predefined list of columns.
         chunk_size (int, optional): The number of rows to read from the CSV
             file at a time. Defaults to 500.
+        persist_directory (str | Path, optional): Directory used by
+            chromadb.PersistentClient. Defaults to
+            <project_root>/chroma_storage.
 
     Returns:
         chromadb.Collection: The ChromaDB collection object.
     """
-    # Initialize ChromaDB client and collection
-    client = chromadb.Client()
+    # Initialize persistent ChromaDB client and collection
+    persist_path = Path(persist_directory)
+    persist_path.mkdir(parents=True, exist_ok=True)
+    client = chromadb.PersistentClient(path=str(persist_path))
     collection = client.get_or_create_collection(name=collection_name, embedding_function=embedding_function)
 
     total_rows = _count_csv_data_rows(file_path) if show_progress else 0
