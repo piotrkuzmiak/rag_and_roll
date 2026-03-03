@@ -1,7 +1,7 @@
 import os
 from typing import List
 
-import google.genai as genai
+from openai import OpenAI
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
 from src.wikivoyage_textfile_to_chromadb import create_chromadb_collection_from_csv
@@ -9,11 +9,10 @@ from src.wikivoyage_textfile_to_chromadb import create_chromadb_collection_from_
 
 def build_prompt(query: str, context: List[str]) -> str:
     base_prompt = {
-        "content": "I am going to ask you a question, which I would like you to answer"
-        " based only on the provided context, and not any other information."
-        " If there is not enough information in the context to answer the question,"
+        "content": "You are a helpful assistant. Answer the question using only the"
+        " provided context. If there is not enough information in the context,"
         ' say "I am not sure", then try to make a guess.'
-        " Break your answer up into nicely readable paragraphs.",
+        " Format the answer in readable paragraphs.",
     }
     user_prompt = {
         "content": f" The question is '{query}'. Here is all the context you have:"
@@ -22,21 +21,20 @@ def build_prompt(query: str, context: List[str]) -> str:
     return f"{base_prompt['content']} {user_prompt['content']}"
 
 
-def get_gemini_response(client: genai.Client, query: str, context: List[str]) -> str:
-    response = client.models.generate_content(
-        model="gemini-2.0-flash", contents=build_prompt(query, context)
+def get_openai_response(client: OpenAI, query: str, context: List[str]) -> str:
+    response = client.responses.create(
+        model="gpt-4o-mini",
+        input=build_prompt(query, context),
     )
-    return response.text
+    return response.output_text
 
 
 def main() -> None:
-    if "GOOGLE_API_KEY" not in os.environ:
-        gapikey = input("Please enter your Google API Key: ")
-        os.environ["GOOGLE_API_KEY"] = gapikey
+    if "OPENAI_API_KEY" not in os.environ:
+        openai_api_key = input("Please enter your OpenAI API Key: ")
+        os.environ["OPENAI_API_KEY"] = openai_api_key
 
-    google_api_key = os.environ["GOOGLE_API_KEY"]
-    api_version = os.environ.get("GOOGLE_API_VERSION", "v1beta")
-    client = genai.Client(api_key=google_api_key, http_options={"api_version": api_version})
+    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
     sentence_transformer_ef = SentenceTransformerEmbeddingFunction(
     model_name="all-MiniLM-L6-v2",
@@ -66,8 +64,7 @@ def main() -> None:
                 for result in results["metadatas"][0]  # type: ignore
             ]
         )
-
-        response = get_gemini_response(client, query, results["documents"][0])  # type: ignore
+        response = get_openai_response(client, query, results["documents"][0])  # type: ignore
 
         print(response)
         print("\n")
