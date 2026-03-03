@@ -85,29 +85,28 @@ def create_chromadb_collection_from_csv(
     embedded_rows = 0
 
     for chunk in pd.read_csv(file_path, chunksize=chunk_size, header=0):
+        chunk_start_line_number = processed_rows + 2
         processed_rows += len(chunk)
 
         # Ensure document_column is of string type, filling NaNs, and filter out empty strings
         chunk[document_column] = chunk[document_column].fillna("").astype(str)
         mask = chunk[document_column].str.strip() != ""
         filtered_chunk = chunk[mask]
+        filtered_line_numbers = [chunk_start_line_number + i for i, keep in enumerate(mask.tolist()) if keep]
 
         if show_progress:
             _print_progress_bar(processed_rows, total_rows, embedded_rows)
 
         if filtered_chunk.empty:
             continue
-
-        ids = filtered_chunk.index.astype(str).tolist()
+        ids = [str(line_number) for line_number in filtered_line_numbers]
         documents = filtered_chunk[document_column].tolist()
 
         # Add filename and line number to metadata for main.py to use
         # Use .copy() to avoid SettingWithCopyWarning
         metadatas_chunk = filtered_chunk.copy()
-        metadatas_chunk["filename"] = file_path.split("/")[-1]
-        metadatas_chunk["line_number"] = (
-            metadatas_chunk.index + 2
-        )  # +1 for 0-indexing, +1 for header
+        metadatas_chunk["filename"] = Path(file_path).name
+        metadatas_chunk["line_number"] = filtered_line_numbers
 
         current_metadata_cols = metadata_columns + ["filename", "line_number"]
         metadatas = metadatas_chunk[current_metadata_cols].to_dict(orient="records")
