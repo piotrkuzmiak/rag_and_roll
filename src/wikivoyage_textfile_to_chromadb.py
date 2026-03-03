@@ -9,6 +9,27 @@ import pandas as pd
 import chromadb
 
 
+def _count_csv_data_rows(file_path: str) -> int:
+    """Count CSV data rows, excluding the header."""
+    with open(file_path, "r", encoding="utf-8") as file:
+        return max(sum(1 for _ in file) - 1, 0)
+
+
+def _print_progress_bar(processed: int, total: int, embedded: int, width: int = 40) -> None:
+    """Print a single-line terminal progress bar."""
+    if total <= 0:
+        return
+
+    ratio = min(processed / total, 1.0)
+    filled = int(width * ratio)
+    bar = "#" * filled + "-" * (width - filled)
+    print(
+        f"\rEmbedding progress [{bar}] {processed}/{total} rows ({ratio * 100:5.1f}%) | embedded: {embedded}",
+        end="",
+        flush=True,
+    )
+
+
 def create_chromadb_collection_from_csv(
     file_path: str,
     collection_name: str = "wikivoyage",
@@ -25,6 +46,7 @@ def create_chromadb_collection_from_csv(
     ],
     chunk_size: int = 500,
     embedding_function=None,
+    show_progress: bool = True,
 ) -> chromadb.Collection:
     """
     Creates or updates a ChromaDB collection from a CSV file.
@@ -51,11 +73,20 @@ def create_chromadb_collection_from_csv(
     client = chromadb.Client()
     collection = client.get_or_create_collection(name=collection_name, embedding_function=embedding_function)
 
+    total_rows = _count_csv_data_rows(file_path) if show_progress else 0
+    processed_rows = 0
+    embedded_rows = 0
+
     for chunk in pd.read_csv(file_path, chunksize=chunk_size, header=0):
+        processed_rows += len(chunk)
+
         # Ensure document_column is of string type, filling NaNs, and filter out empty strings
         chunk[document_column] = chunk[document_column].fillna("").astype(str)
         mask = chunk[document_column].str.strip() != ""
         filtered_chunk = chunk[mask]
+
+        if show_progress:
+            _print_progress_bar(processed_rows, total_rows, embedded_rows)
 
         if filtered_chunk.empty:
             continue
@@ -75,5 +106,12 @@ def create_chromadb_collection_from_csv(
         metadatas = metadatas_chunk[current_metadata_cols].to_dict(orient="records")
 
         collection.add(ids=ids, documents=documents, metadatas=metadatas)
+        embedded_rows += len(filtered_chunk)
+
+        if show_progress:
+            _print_progress_bar(processed_rows, total_rows, embedded_rows)
+
+    if show_progress and total_rows > 0:
+        print()
 
     return collection
