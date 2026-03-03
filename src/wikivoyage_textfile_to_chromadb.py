@@ -112,7 +112,7 @@ def create_chromadb_collection_from_csv(
         current_metadata_cols = metadata_columns + ["filename", "line_number"]
         metadatas = metadatas_chunk[current_metadata_cols].to_dict(orient="records")
 
-        collection.add(ids=ids, documents=documents, metadatas=metadatas)
+        collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
         embedded_rows += len(filtered_chunk)
 
         if show_progress:
