@@ -13,6 +13,7 @@ dependencies = [
     "tqdm>=4.67.3",
     "pandas>=3.0.1",
     "sentence-transformers>=5.2.3",
+    "openai>=2.23.0",
 ]
 
 [dependency-groups]
