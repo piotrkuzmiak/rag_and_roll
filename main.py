@@ -1,7 +1,14 @@
 import os
+import time
 from typing import List
 
-from openai import OpenAI
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    OpenAI,
+    RateLimitError,
+)
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 import torch
 
@@ -23,12 +30,47 @@ def build_prompt(query: str, context: List[str]) -> str:
 
 
 def get_openai_response(client: OpenAI, query: str, context: List[str]) -> str:
-    response = client.responses.create(
-        model="gpt-4o-mini",
-        input=build_prompt(query, context),
-    )
-    return response.output_text
+    prompt = build_prompt(query, context)
+    max_retries = 3
 
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = client.responses.create(
+                model="gpt-4o-mini",
+                input=prompt,
+            )
+            return response.output_text
+        except RateLimitError as err:
+            # Do not retry when quota is exhausted; user action is required.
+            error_code = (
+                getattr(getattr(err, "response", None), "json", lambda: {})()
+                .get("error", {})
+                .get("code")
+            )
+            if error_code == "insufficient_quota":
+                return (
+                    "OpenAI request failed: your account quota is exhausted "
+                    "(error: insufficient_quota). Add credits or change your plan, "
+                    "then run again."
+                )
+
+            if attempt == max_retries:
+                return (
+                    "OpenAI request failed after multiple retries due to rate limiting. "
+                    "Please wait a moment and try again."
+                )
+            time.sleep(2**attempt)
+        except (APITimeoutError, APIConnectionError):
+            if attempt == max_retries:
+                return (
+                    "OpenAI request failed due to a network/timeout issue after retries. "
+                    "Please check your connection and try again."
+                )
+            time.sleep(2**attempt)
+        except APIStatusError as err:
+            return f"OpenAI request failed with HTTP {err.status_code}. Please try again."
+
+    return "OpenAI request failed unexpectedly. Please try again."
 
 def main() -> None:
     if "OPENAI_API_KEY" not in os.environ:
