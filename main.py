@@ -36,7 +36,7 @@ def get_openai_response(client: OpenAI, query: str, context: List[str]) -> str:
     for attempt in range(1, max_retries + 1):
         try:
             response = client.responses.create(
-                model="gpt-4o-mini",
+                model="gpt-4o",
                 input=prompt,
             )
             return response.output_text
@@ -89,6 +89,7 @@ def main(force_reindex: bool = False) -> None:
     collection = create_chromadb_collection_from_csv(
         file_path=f"{os.path.dirname(os.path.abspath(__file__))}/wikivoyage_data/wikivoyage-listings-en.csv",
         embedding_function=sentence_transformer_ef,
+        force_reindex=force_reindex,
     )
 
     while True:
