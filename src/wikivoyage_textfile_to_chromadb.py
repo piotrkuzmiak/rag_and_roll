@@ -102,28 +102,30 @@ def create_chromadb_collection_from_csv(
         chunk_start_line_number = processed_rows + 2
         processed_rows += len(chunk)
 
-        # Ensure document_column is of string type, filling NaNs, and filter out empty strings
-        chunk[document_column] = chunk[document_column].fillna("").astype(str)
-        mask = chunk[document_column].str.strip() != ""
-        filtered_chunk = chunk[mask]
-        filtered_line_numbers = [chunk_start_line_number + i for i, keep in enumerate(mask.tolist()) if keep]
+        doc_values = chunk[document_column].fillna("").astype(str)
+        mask = doc_values.str.strip().ne("")
+        if not mask.any():
+            if show_progress:
+                _print_progress_bar(processed_rows, total_rows, embedded_rows)
+            continue
+
+        filtered_chunk = chunk.loc[mask].copy()
+        filtered_chunk[document_column] = doc_values.loc[mask]
+        kept_indices = mask.to_numpy().nonzero()[0]
+        filtered_line_numbers = (kept_indices + chunk_start_line_number).tolist()
 
         if show_progress:
             _print_progress_bar(processed_rows, total_rows, embedded_rows)
 
-        if filtered_chunk.empty:
-            continue
         ids = [str(line_number) for line_number in filtered_line_numbers]
         documents = filtered_chunk[document_column].tolist()
 
         # Add filename and line number to metadata for main.py to use
-        # Use .copy() to avoid SettingWithCopyWarning
-        metadatas_chunk = filtered_chunk.copy()
-        metadatas_chunk["filename"] = Path(file_path).name
-        metadatas_chunk["line_number"] = filtered_line_numbers
+        filtered_chunk["filename"] = Path(file_path).name
+        filtered_chunk["line_number"] = filtered_line_numbers
 
         current_metadata_cols = metadata_columns + ["filename", "line_number"]
-        metadatas = metadatas_chunk[current_metadata_cols].to_dict(orient="records")
+        metadatas = filtered_chunk[current_metadata_cols].to_dict(orient="records")
 
         collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
         embedded_rows += len(filtered_chunk)
