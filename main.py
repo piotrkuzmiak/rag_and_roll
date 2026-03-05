@@ -72,7 +72,7 @@ def get_openai_response(client: OpenAI, query: str, context: List[str]) -> str:
 
     return "OpenAI request failed unexpectedly. Please try again."
 
-def main() -> None:
+def main(force_reindex: bool = False) -> None:
     if "OPENAI_API_KEY" not in os.environ:
         openai_api_key = input("Please enter your OpenAI API Key: ")
         os.environ["OPENAI_API_KEY"] = openai_api_key
