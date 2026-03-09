@@ -87,7 +87,7 @@ def main(force_reindex: bool = False) -> None:
     )
 
     collection = create_chromadb_collection_from_csv(
-        file_path=f"{os.path.dirname(os.path.abspath(__file__))}/wikivoyage_data/wikivoyage-listings-en.csv",
+        file_path=f"{os.path.dirname(os.path.abspath(__file__))}/polish_mountains_hiking_trails_fake.csv",
         embedding_function=sentence_transformer_ef,
         force_reindex=force_reindex,
     )
