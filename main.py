@@ -11,6 +11,8 @@ from src.wikivoyage_textfile_to_chromadb import create_chromadb_collection_from_
 
 @dataclass
 class RAGDeps:
+    """Dependencies injected into agent tools for retrieval-augmented generation."""
+
     collection: object
 
 
@@ -28,6 +30,7 @@ agent = Agent("openai:gpt-4o", system_prompt=SYSTEM_PROMPT, deps_type=RAGDeps)
 @agent.tool
 def search_attractions(ctx: RunContext[RAGDeps], query: str, n_results: int = 5) -> str:
     """Search mountain attractions in ChromaDB and return formatted context with sources."""
+    # Clamp result count to avoid overly large responses and speed up retrieval.
     results = ctx.deps.collection.query(
         query_texts=[query],
         n_results=max(1, min(n_results, 10)),
@@ -63,9 +66,11 @@ def search_attractions(ctx: RunContext[RAGDeps], query: str, n_results: int = 5)
 
 
 def main(force_reindex: bool = False) -> None:
+    """Run an interactive CLI that answers mountain-travel questions with RAG."""
     if "OPENAI_API_KEY" not in os.environ:
         os.environ["OPENAI_API_KEY"] = input("Please enter your OpenAI API Key: ").strip()
 
+    # Prefer GPU embeddings when available for faster indexing/query performance.
     embedding_device = "cuda" if torch.cuda.is_available() else "cpu"
     sentence_transformer_ef = SentenceTransformerEmbeddingFunction(
         model_name="all-MiniLM-L6-v2",
@@ -83,6 +88,7 @@ def main(force_reindex: bool = False) -> None:
     deps = RAGDeps(collection=collection)
 
     try:
+        # Keep the CLI loop active until user interrupts with Ctrl+C.
         while True:
             query = input("Query: ").strip()
             if not query:
@@ -90,6 +96,7 @@ def main(force_reindex: bool = False) -> None:
                 continue
 
             print("\nThinking...\n")
+            # The prompt enforces tool usage before producing a final answer.
             user_prompt = (
                 "Use the `search_attractions` tool with the user question, then answer.\n"
                 f"Question: {query}\n"
