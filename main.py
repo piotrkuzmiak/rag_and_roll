@@ -6,7 +6,7 @@ import torch
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 from pydantic_ai import Agent, RunContext
 
-from src.wikivoyage_textfile_to_chromadb import create_chromadb_collection_from_csv
+from src.textfile_to_chromadb import create_chromadb_collection_from_csv
 
 
 @dataclass
