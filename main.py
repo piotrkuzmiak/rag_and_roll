@@ -1,120 +1,106 @@
 import os
-import time
-from typing import List
+from pathlib import Path
+from dataclasses import dataclass
 
-from openai import (
-    APIConnectionError,
-    APIStatusError,
-    APITimeoutError,
-    OpenAI,
-    RateLimitError,
-)
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 import torch
+from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+from pydantic_ai import Agent, RunContext
 
 from src.wikivoyage_textfile_to_chromadb import create_chromadb_collection_from_csv
 
 
-def build_prompt(query: str, context: List[str]) -> str:
-    base_prompt = {
-        "content": "You are a helpful assistant. Answer the question using only the"
-        " provided context. If there is not enough information in the context,"
-        ' say "I am not sure", then try to make a guess.'
-        " Format the answer in readable paragraphs.",
-    }
-    user_prompt = {
-        "content": f" The question is '{query}'. Here is all the context you have:"
-        f"{(' ').join(context)}",
-    }
-    return f"{base_prompt['content']} {user_prompt['content']}"
+@dataclass
+class RAGDeps:
+    collection: object
 
 
-def get_openai_response(client: OpenAI, query: str, context: List[str]) -> str:
-    prompt = build_prompt(query, context)
-    max_retries = 3
+SYSTEM_PROMPT = (
+    "You are a travel assistant for Polish mountain attractions. "
+    "Use the `search_attractions` tool to retrieve relevant data before answering. "
+    "Answer using only the retrieved context. "
+    'If context is insufficient, reply with "I am not sure" and then provide a brief best-effort guess.'
+)
 
-    for attempt in range(1, max_retries + 1):
-        try:
-            response = client.responses.create(
-                model="gpt-4o",
-                input=prompt,
+
+agent = Agent("openai:gpt-4o", system_prompt=SYSTEM_PROMPT, deps_type=RAGDeps)
+
+
+@agent.tool
+def search_attractions(ctx: RunContext[RAGDeps], query: str, n_results: int = 5) -> str:
+    """Search mountain attractions in ChromaDB and return formatted context with sources."""
+    results = ctx.deps.collection.query(
+        query_texts=[query],
+        n_results=max(1, min(n_results, 10)),
+        include=["documents", "metadatas"],
+    )
+
+    documents = results.get("documents", [[]])[0]
+    metadatas = results.get("metadatas", [[]])[0]
+    if not documents:
+        return "No results found."
+
+    context_parts: list[str] = []
+    for idx, (document, metadata) in enumerate(zip(documents, metadatas), start=1):
+        context_parts.append(
+            "\n".join(
+                [
+                    f"Result {idx}",
+                    f"description: {document}",
+                    f"address: {metadata.get('address', '')}",
+                    f"directions: {metadata.get('directions', '')}",
+                    f"hours: {metadata.get('hours', '')}",
+                    f"checkIn: {metadata.get('checkIn', '')}",
+                    f"checkOut: {metadata.get('checkOut', '')}",
+                    f"latitude: {metadata.get('latitude', '')}",
+                    f"longitude: {metadata.get('longitude', '')}",
+                    f"accessibility: {metadata.get('accessibility', '')}",
+                    f"source: {metadata.get('filename', 'unknown')}: line {metadata.get('line_number', '?')}",
+                ]
             )
-            return response.output_text
-        except RateLimitError as err:
-            # Do not retry when quota is exhausted; user action is required.
-            error_code = (
-                getattr(getattr(err, "response", None), "json", lambda: {})()
-                .get("error", {})
-                .get("code")
-            )
-            if error_code == "insufficient_quota":
-                return (
-                    "OpenAI request failed: your account quota is exhausted "
-                    "(error: insufficient_quota). Add credits or change your plan, "
-                    "then run again."
-                )
+        )
 
-            if attempt == max_retries:
-                return (
-                    "OpenAI request failed after multiple retries due to rate limiting. "
-                    "Please wait a moment and try again."
-                )
-            time.sleep(2**attempt)
-        except (APITimeoutError, APIConnectionError):
-            if attempt == max_retries:
-                return (
-                    "OpenAI request failed due to a network/timeout issue after retries. "
-                    "Please check your connection and try again."
-                )
-            time.sleep(2**attempt)
-        except APIStatusError as err:
-            return f"OpenAI request failed with HTTP {err.status_code}. Please try again."
+    return "\n\n".join(context_parts)
 
-    return "OpenAI request failed unexpectedly. Please try again."
 
 def main(force_reindex: bool = False) -> None:
     if "OPENAI_API_KEY" not in os.environ:
-        openai_api_key = input("Please enter your OpenAI API Key: ")
-        os.environ["OPENAI_API_KEY"] = openai_api_key
+        os.environ["OPENAI_API_KEY"] = input("Please enter your OpenAI API Key: ").strip()
 
-    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
     embedding_device = "cuda" if torch.cuda.is_available() else "cpu"
-
     sentence_transformer_ef = SentenceTransformerEmbeddingFunction(
         model_name="all-MiniLM-L6-v2",
         device=embedding_device,
         normalize_embeddings=False,
     )
 
+    csv_path = Path(__file__).resolve().parent / "polish_mountains_hiking_trails_fake.csv"
     collection = create_chromadb_collection_from_csv(
-        file_path=f"{os.path.dirname(os.path.abspath(__file__))}/polish_mountains_hiking_trails_fake.csv",
+        file_path=str(csv_path),
+        collection_name="polish_mountains_hiking_trails",
         embedding_function=sentence_transformer_ef,
         force_reindex=force_reindex,
     )
+    deps = RAGDeps(collection=collection)
 
-    while True:
-        query = input("Query: ")
-        if len(query) == 0:
-            print("Please enter a question. Ctrl+C to Quit.\n")
-            continue
-        print("\nThinking...\n")
+    try:
+        while True:
+            query = input("Query: ").strip()
+            if not query:
+                print("Please enter a question. Ctrl+C to Quit.\n")
+                continue
 
-        results = collection.query(
-            query_texts=[query], n_results=5, include=["documents", "metadatas"]
-        )
+            print("\nThinking...\n")
+            user_prompt = (
+                "Use the `search_attractions` tool with the user question, then answer.\n"
+                f"Question: {query}\n"
+                "Answer in clear, readable paragraphs and include key source lines when relevant."
+            )
+            result = agent.run_sync(user_prompt, deps=deps)
 
-        sources = "\n".join(
-            [
-                f"{result['filename']}: line {result['line_number']}"
-                for result in results["metadatas"][0]  # type: ignore
-            ]
-        )
-        response = get_openai_response(client, query, results["documents"][0])  # type: ignore
-
-        print(response)
-        print("\n")
-        print(f"Source documents:\n{sources}")
-        print("\n")
+            print(result.output)
+            print()
+    except KeyboardInterrupt:
+        print("\nExiting.")
 
 
 if __name__ == "__main__":
