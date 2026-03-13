@@ -31,8 +31,7 @@ SYSTEM_PROMPT = (
 )
 
 
-agent = Agent("openai:gpt-4o", system_prompt=SYSTEM_PROMPT, deps_type=RAGDeps)
-
+agent = Agent("openai:gpt-5-nano", system_prompt=SYSTEM_PROMPT, deps_type=RAGDeps)
 
 @agent.tool
 def search_hiking_trails(ctx: RunContext[RAGDeps], query: str, n_results: int = 5) -> str:
