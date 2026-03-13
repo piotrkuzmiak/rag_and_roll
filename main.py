@@ -17,10 +17,17 @@ class RAGDeps:
 
 
 SYSTEM_PROMPT = (
-    "You are a travel assistant for Polish mountain attractions. "
-    "Use the `search_attractions` tool to retrieve relevant data before answering. "
-    "Answer using only the retrieved context. "
-    'If context is insufficient, reply with "I am not sure" and then provide a brief best-effort guess.'
+    "You are a travel assistant for Polish mountain hike trails. "
+    "Use the `search_hiking_trails` tool first to retrieve local ChromaDB data. "
+    "The 'search_hiking_trails' tool takes a user query and returns relevant hiking trail information from the database, including descriptions, addresses, directions, hours, check-in/check-out times, latitude/longitude, accessibility info, and source references. "
+    "The goal is to based on the retrieved context, answer the user's question about hiking trails in the Polish mountains."
+    "Do not use your own reasoning to answer the question until you have retrieved relevant context with the tool. "
+    "Answer using only the retrieved context."
+    "Both locations must be present in the retrieved context to calculate the distance."
+    "If context is insufficient, reply with 'I am not sure' and then provide a brief best-effort guess."
+    "Answer in clear, readable paragraphs and include key source lines when relevant."
+    "Calculate the distance between two points even if the user does not ask for it, using the latitude and longitude from the context and present it in kilometers. Use the Haversine formula for distance calculation."
+    "Show only one hike trail in the answer, even if multiple are retrieved, and choose the one that best matches the user's query."
 )
 
 
@@ -28,7 +35,7 @@ agent = Agent("openai:gpt-4o", system_prompt=SYSTEM_PROMPT, deps_type=RAGDeps)
 
 
 @agent.tool
-def search_attractions(ctx: RunContext[RAGDeps], query: str, n_results: int = 5) -> str:
+def search_hiking_trails(ctx: RunContext[RAGDeps], query: str, n_results: int = 5) -> str:
     """Search mountain attractions in ChromaDB and return formatted context with sources."""
     # Clamp result count to avoid overly large responses and speed up retrieval.
     results = ctx.deps.collection.query(
@@ -36,6 +43,7 @@ def search_attractions(ctx: RunContext[RAGDeps], query: str, n_results: int = 5)
         n_results=max(1, min(n_results, 10)),
         include=["documents", "metadatas"],
     )
+    # print(query, results)  # Debug: print raw query results from ChromaDB
 
     documents = results.get("documents", [[]])[0]
     metadatas = results.get("metadatas", [[]])[0]
@@ -96,14 +104,7 @@ def main(force_reindex: bool = False) -> None:
                 continue
 
             print("\nThinking...\n")
-            # The prompt enforces tool usage before producing a final answer.
-            user_prompt = (
-                "Use the `search_attractions` tool with the user question, then answer.\n"
-                f"Question: {query}\n"
-                "Answer in clear, readable paragraphs and include key source lines when relevant."
-            )
-            result = agent.run_sync(user_prompt, deps=deps)
-
+            result = agent.run_sync(deps=deps)
             print(result.output)
             print()
     except KeyboardInterrupt:
