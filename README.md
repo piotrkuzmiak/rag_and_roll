@@ -1,63 +1,45 @@
 # rag_and_roll
 
-`rag_and_roll` is a repository dedicated to developing LLM-based applications, specifically focusing on Retrieval-Augmented Generation (RAG) and structured data extraction. The project currently leverages [Firecrawl](https://www.firecrawl.dev/) to interact with web content and extract meaningful information.
+`rag_and_roll` is a Retrieval-Augmented Generation (RAG) CLI demo for Polish mountain attractions.
+It:
 
-## Features
-
-- **Structured Web Scraping**: Utilize Firecrawl to perform complex web interactions (filling forms, searching) and extract data into structured JSON formats using Pydantic models.
-- **Wikivoyage Integration**: Example implementation for extracting travel destination details from Wikivoyage.
+1. Loads `polish_mountains_hiking_trails_fake.csv` into a ChromaDB collection.
+2. Uses `all-MiniLM-L6-v2` sentence-transformer embeddings (GPU if available, otherwise CPU).
+3. Runs an agent that retrieves relevant records and answers questions using only retrieved context.
 
 ## Installation
 
-This project uses `uv` for dependency management. To get started, clone the repository and run:
+This project uses `uv`:
 
 ```bash
 uv sync
 ```
 
-Alternatively, you can install the dependencies using `pip`:
-
-```bash
-pip install firecrawl-py pydantic-ai python-dotenv
-```
-
 ## Configuration
 
-The project requires a Firecrawl API key. Create a `.env` file in the root directory:
-
-```env
-FIRECRAWL_API_KEY=your_firecrawl_api_key
-```
-
-## Usage
-
-### Firecrawl Form Scraper
-
-The `src/firecrawl_form_scraper.py` script demonstrates how to automate form interactions and extract structured data.
-
-To run the example:
+Set your OpenAI API key:
 
 ```bash
-python src/firecrawl_form_scraper.py
+export OPENAI_API_KEY=your_openai_api_key
 ```
 
-#### How it works
+If `OPENAI_API_KEY` is not set, `main.py` will prompt for it at startup.
 
-The script defines an `extract_structured_data` function that:
-1.  **Navigates** to the target URL.
-2.  **Interacts** with the page by typing a search term into an input field and pressing "Enter".
-3.  **Waits** for the content to load and takes a screenshot.
-4.  **Extracts** structured data based on a provided Pydantic schema (e.g., `TravelDestination`).
+## Run
 
-Example Pydantic schema used in the script:
+Start the interactive CLI:
 
-```python
-class TravelDestination(BaseModel):
-    name: str
-    location: str
-    description: str
-    best_time_to_visit: str
-    attractions: list[str]
-    difficulty_level: str
-    duration_days: int
+```bash
+python main.py
+```
+
+Type questions at the `Query:` prompt and press Enter.  
+Use `Ctrl+C` to exit.
+
+## Optional: force reindex
+
+By default, the existing ChromaDB index is reused when available. To force rebuilding:
+
+```bash
+python -c "import main; main.main(force_reindex=True)"
 ```
