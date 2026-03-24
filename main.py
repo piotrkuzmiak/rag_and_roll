@@ -103,7 +103,7 @@ def main(force_reindex: bool = False) -> None:
                 continue
 
             print("\nThinking...\n")
-            result = agent.run_sync(deps=deps)
+            result = agent.run_sync(query, deps=deps)
             print(result.output)
             print()
     except KeyboardInterrupt:
