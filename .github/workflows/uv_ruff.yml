@@ -1,0 +1,29 @@
+name: Run ruff
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        run: curl -Ls https://astral.sh/uv/install.sh | sh
+
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
+
+      - name: Install dependencies
+        run: ~/.local/bin/uv sync --frozen
+
+      - name: Lint with ruff
+        run: |
+          ~/.local/bin/uv run pip install ruff
+          ~/.local/bin/uv run ruff check .
