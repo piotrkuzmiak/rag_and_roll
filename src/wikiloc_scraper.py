@@ -188,6 +188,46 @@ ACTIVITY_SLUGS: dict[str, str] = {
     "kayaking": "kayaking",
 }
 
+# skill field in Wikiloc API → human-readable difficulty
+_SKILL_MAP: dict[int, str] = {
+    1: "Easy",
+    2: "Moderate",
+    3: "Hard",
+    4: "Expert",
+}
+
+# JS injected into Wikiloc page to call the internal search API and write results
+# to a hidden DOM element so Firecrawl can read them back.
+_FETCH_TRAILS_JS = """
+(function(query, limit) {{
+    var url = '/wikiloc/find.do?event=map&to=' + limit
+            + '&sw=-89.999,-179.999&ne=89.999,179.999'
+            + '&q=' + encodeURIComponent(query);
+    fetch(url)
+        .then(function(r) {{ return r.json(); }})
+        .then(function(data) {{
+            var el = document.getElementById('__wl_api_result');
+            if (!el) {{
+                el = document.createElement('div');
+                el.id = '__wl_api_result';
+                el.style.display = 'none';
+                document.body.appendChild(el);
+            }}
+            el.textContent = JSON.stringify(data);
+        }})
+        .catch(function(e) {{
+            var el = document.getElementById('__wl_api_result');
+            if (!el) {{
+                el = document.createElement('div');
+                el.id = '__wl_api_result';
+                el.style.display = 'none';
+                document.body.appendChild(el);
+            }}
+            el.textContent = JSON.stringify({{error: e.message}});
+        }});
+}})('{query}', {limit});
+"""
+
 
 # Common location name → Wikiloc URL path segment mappings.
 # Wikiloc uses lowercase slugs matching the country/region path in their URL.
@@ -245,10 +285,9 @@ def _location_to_path(query: str) -> str:
     return ""
 
 
-def _build_search_url(activity: str, location_path: str = "") -> str:
+def _build_host_url(activity: str) -> str:
+    """Return a Wikiloc page URL to load — only needed to establish session cookies."""
     slug = ACTIVITY_SLUGS.get(activity.lower(), "hiking")
-    if location_path:
-        return f"https://www.wikiloc.com/trails/{slug}/{location_path}"
     return f"https://www.wikiloc.com/trails/{slug}"
 
 
@@ -258,6 +297,60 @@ def _consent_actions() -> list:
         ExecuteJavascriptAction(script=_DISMISS_CONSENT_JS),
         WaitAction(milliseconds=600),
     ]
+
+
+def _api_search_actions(query: str, limit: int = 24) -> list:
+    """Return actions that call Wikiloc's internal search API from within the page."""
+    safe_query = query.replace("'", "\\'").replace("\\", "\\\\")
+    js = _FETCH_TRAILS_JS.format(query=safe_query, limit=limit)
+    return [
+        ExecuteJavascriptAction(script=_DISMISS_CONSENT_JS),
+        WaitAction(milliseconds=800),
+        ExecuteJavascriptAction(script=js),
+        WaitAction(milliseconds=4000),   # wait for fetch to complete
+    ]
+
+
+def _parse_trail_summary(raw: dict) -> TrailSummary | None:
+    """Convert a raw Wikiloc API trail object to a TrailSummary."""
+    pretty = raw.get("prettyURL", "")
+    if not pretty:
+        return None
+    url = f"https://www.wikiloc.com{pretty}"
+
+    # Convert distance: API returns miles when uom="mi", km when uom="km"
+    dist_raw = raw.get("distance")
+    uom = raw.get("uom", "km")
+    distance_km: float | None = None
+    if dist_raw is not None:
+        try:
+            d = float(dist_raw)
+            distance_km = round(d * 1.60934, 2) if uom == "mi" else round(d, 2)
+        except (ValueError, TypeError):
+            pass
+
+    # Convert elevation: API returns feet when uomslope="f", metres when "m"
+    slope_raw = raw.get("slope")
+    uomslope = raw.get("uomslope", "m")
+    elevation_m: int | None = None
+    if slope_raw is not None:
+        try:
+            s = float(slope_raw)
+            elevation_m = int(s * 0.3048) if uomslope == "f" else int(s)
+        except (ValueError, TypeError):
+            pass
+
+    return TrailSummary(
+        name=raw.get("name", ""),
+        url=url,
+        activity_type=raw.get("pictoText", "hiking"),
+        difficulty=_SKILL_MAP.get(int(raw["skill"])) if raw.get("skill") else None,
+        distance_km=distance_km,
+        elevation_gain_m=elevation_m,
+        location=raw.get("near"),
+        rating=raw.get("rating"),
+        reviews_count=raw.get("numRatings"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -271,58 +364,68 @@ def search_trails(
 ) -> TrailSearchResults:
     """Search Wikiloc for trails matching a keyword or location.
 
+    Uses Wikiloc's internal JSON API (find.do) by injecting a fetch() call
+    from within a Wikiloc page context via Firecrawl — bypassing the broken
+    client-side search URL approach.
+
     Args:
         query: Free-text search, e.g. "Zakopane", "Tatry ridge", "Val d'Aran".
         activity: Activity type. Supported values: hiking, cycling, mountain-biking,
                   trail-running, running, walking, ski-touring, snowshoeing,
                   via-ferrata, climbing, horse-riding, kayaking.
                   Defaults to "hiking".
-        page: Results page number (1-based). Each page returns ~20 trails.
+        page: Results page (1-based, 24 results per page).
 
     Returns:
         TrailSearchResults with a list of TrailSummary objects.
     """
-    location_path = _location_to_path(query)
-    url = _build_search_url(activity, location_path)
-    print(f"[wikiloc] Search URL: {url} | query: '{query}' | location_path: '{location_path}'")
-    print("[wikiloc] Scraping search results (this may take 30-60s)...")
+    host_url = _build_host_url(activity)
+    limit = 24
+    print(f"[wikiloc] Searching via internal API | query: '{query}' | host: {host_url}")
+    print("[wikiloc] Loading page and injecting API call (this may take 20-40s)...")
 
     result = client.scrape(
-        url,
-        actions=_consent_actions(),
-        formats=[
-            JsonFormat(
-                type="json",
-                schema=TrailSearchResults.model_json_schema(),
-                prompt=(
-                    f"Extract trails from this Wikiloc page that are near or related to '{query}'. "
-                    "For each trail listed, extract: "
-                    "name (trail title), "
-                    "url (the full href of the trail link — must start with https://www.wikiloc.com), "
-                    "activity_type (hiking/cycling/etc.), "
-                    "difficulty (Easy/Moderate/Hard/Expert if shown), "
-                    "distance_km (numeric kilometres), "
-                    "elevation_gain_m (positive ascent in metres), "
-                    "estimated_duration (e.g. '3h 20min'), "
-                    "location (place name or region shown on the card), "
-                    "rating (numeric 1-5 if shown), "
-                    "reviews_count (integer count of reviews/comments). "
-                    "Also extract total_results_hint if the page shows a total count of results."
-                ),
-            )
-        ],
+        host_url,
+        actions=_api_search_actions(query, limit=limit),
+        formats=["rawHtml"],
         only_main_content=False,
-        wait_for=4000,
+        wait_for=1000,
         timeout=90000,
         remove_base64_images=True,
         block_ads=True,
         proxy="stealth",
     )
 
-    print(f"[wikiloc] Search done. Raw JSON: {result.json}")
-    if result.json:
-        return TrailSearchResults.model_validate(result.json)
-    return TrailSearchResults(trails=[], total_results_hint=None)
+    # Parse the hidden div that our JS injected with the API response
+    import json as _json
+    import re as _re
+    raw_html = result.raw_html or ""
+    match = _re.search(r'id="__wl_api_result"[^>]*>([^<]+)<', raw_html)
+    raw_str = match.group(1).strip() if match else ""
+    print(f"[wikiloc] Extracted API data length: {len(raw_str)} chars | preview: {raw_str[:100]}")
+
+    if not raw_str:
+        print("[wikiloc] No API data found in page — fetch may not have completed.")
+        return TrailSearchResults(trails=[], total_results_hint=None)
+
+    try:
+        api_data = _json.loads(raw_str)
+    except Exception as e:
+        print(f"[wikiloc] Failed to parse API JSON: {e} | raw: {raw_str[:200]}")
+        return TrailSearchResults(trails=[], total_results_hint=None)
+
+    print(f"[wikiloc] API count={api_data.get('count')} spas={len(api_data.get('spas', []))}")
+
+    trails = []
+    for raw_trail in api_data.get("spas", []):
+        summary = _parse_trail_summary(raw_trail)
+        if summary:
+            trails.append(summary)
+
+    return TrailSearchResults(
+        trails=trails,
+        total_results_hint=api_data.get("count"),
+    )
 
 
 def get_trail_details(trail_url: str) -> Optional[TrailDetail]:
