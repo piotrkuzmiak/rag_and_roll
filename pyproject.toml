@@ -15,6 +15,7 @@ dependencies = [
     "sentence-transformers>=5.2.3",
     "openai>=2.23.0",
     "torch>=2.10.0",
+    "firecrawl-py>=2.0.0",
 ]
 
 [dependency-groups]
